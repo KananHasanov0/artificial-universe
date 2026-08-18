@@ -14,9 +14,9 @@ class Body:
         self.volume = 4/3 * math.pi * (self.radius**3)
         self.mass = self.volume * self.density
 
-    def update(self, dt, acceleration_x, acceleration_y):
+    def update(self, dt, acceleration_x, acceleration_y): #Accelerate, then change position.(Semi-implicit Euler)
         
-        velocity_change_x = acceleration_x * dt
+        velocity_change_x = acceleration_x * dt   
         self.velocity_x += velocity_change_x
 
         velocity_change_y = acceleration_y * dt
