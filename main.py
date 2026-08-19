@@ -2,7 +2,7 @@ import pygame
 import math
 
 class Body:
-    def __init__(self,x,y,velocity_x,velocity_y,radius,density,restitution):
+    def __init__(self,x,y,velocity_x,velocity_y,radius,density,restitution,total_acceleration):
         self.x = x
         self.y = y
         self.velocity_y = velocity_y
@@ -10,21 +10,21 @@ class Body:
         self.radius = radius
         self.density = density
         self.restitution = restitution
+        self.total_acceleration = total_acceleration
 
         self.volume = 4/3 * math.pi * (self.radius**3)
         self.mass = self.volume * self.density
 
-    def update(self, dt, acceleration_x, acceleration_y): #Accelerate, then change position.(Semi-implicit Euler)
+    def update(self, dt):
         
-        velocity_change_x = acceleration_x * dt   
+        velocity_change_x = self.total_acceleration[0] * dt   
         self.velocity_x += velocity_change_x
 
-        velocity_change_y = acceleration_y * dt
+        velocity_change_y = self.total_acceleration[1] * dt
         self.velocity_y += velocity_change_y
 
         change_x = self.velocity_x * dt
         change_y = self.velocity_y * dt
-
 
         self.x += change_x
         self.y += change_y
@@ -32,7 +32,7 @@ class Body:
     def gravitational_acceleration(self, other, G):
         dx = other.x - self.x
         dy = other.y - self.y
-        eps = self.radius + other.radius
+        eps = (self.radius + other.radius)*0.1
         r = math.sqrt((dx**2+dy**2+eps**2))
 
         a = G*other.mass/(r**2)
@@ -71,6 +71,7 @@ class Body:
         dx = other.x - self.x
         dy = other.y - self.y
         r = math.sqrt((dx**2+dy**2))
+
         if r <= self.radius + other.radius:
             return True
         else:
@@ -95,7 +96,8 @@ class Body:
             return False
 
     def calculate_collision_impulse(self, other):
-        J = -((self.restitution+1)*self.get_relative_normal_velocity(other))/(1/self.mass+1/other.mass)
+        restitution = min(self.restitution, other.restitution)
+        J = -((restitution+1)*self.get_relative_normal_velocity(other))/(1/self.mass+1/other.mass)
         return J*self.get_collision_normal(other)[0], J*self.get_collision_normal(other)[1]
 
     def apply_collision_impulse(self, other):
@@ -113,6 +115,10 @@ class Body:
         r = math.sqrt((dx**2 + dy**2))
 
         penetration = (self.radius + other.radius) - r
+
+        if penetration <= 0:
+            return
+        
         normal_x = self.get_collision_normal(other)[0]
         normal_y = self.get_collision_normal(other)[1]
         self_fraction = other.mass/(self.mass+other.mass)
@@ -128,7 +134,7 @@ class Body:
         self.y -= self_correction_y
 
         other.x += other_correction_x
-        other.y += other_correction_y     
+        other.y += other_correction_y
 
 pygame.init()
 screen_x, screen_y = 400, 300
@@ -141,12 +147,22 @@ physics_dt = 1 / 120
 clock = pygame.time.Clock()
 
 run = True
+bodies = []
 
-ball = Body(100, 100, 10, 0, 3, 1, 0.3)
-ball_2 = Body(200, 100, -10, 0, 10, 1, 0.3)
+ball = Body(30, 70, 0, 0, 6, 1, 0.8, [0,0])
+ball_2 = Body(80, 70, 0, 0, 10, 1, 0.8, [0,0])
+ball_3 = Body(50, 90, 0, 0, 4, 1, 0.8, [0,0])
+ball_4 = Body(30, 90, 0, 0, 5, 0.5, 0.8, [0,0])
+
+bodies.append(ball)
+bodies.append(ball_2)
+bodies.append(ball_3)
+bodies.append(ball_4)
 
 ball.velocity_x, ball.velocity_y = ball.orbital_velocity(ball_2, 1)
 ball_2.velocity_x, ball_2.velocity_y = ball_2.orbital_velocity(ball, 1)
+ball_3.velocity_x, ball_3.velocity_y = ball_3.orbital_velocity(ball_2, 1)
+ball_4.velocity_x, ball_4.velocity_y = ball_4.orbital_velocity(ball_2, 1)
 
 accumulator = 0
 
@@ -154,32 +170,51 @@ while run:
     dt = clock.tick(fps)
     accumulator += dt / 1000
 
-
     while accumulator >= physics_dt:
 
-        acceleration_a = ball.gravitational_acceleration(ball_2,1)
-        acceleration_b = ball_2.gravitational_acceleration(ball,1)
+        for body in bodies:
+            body.total_acceleration = [0,0]
 
-        ball.update(physics_dt,acceleration_a[0],acceleration_a[1])
-        ball_2.update(physics_dt,acceleration_b[0],acceleration_b[1])
+            for other_body in bodies:
+                if other_body == body:
+                    continue
 
-        if ball.check_collision(ball_2):
-            if ball.is_approaching(ball_2):
-                ball.apply_collision_impulse(ball_2)
-            ball.correct_position(ball_2)
+                body.total_acceleration[0] += body.gravitational_acceleration(other_body,1)[0]
+                body.total_acceleration[1] += body.gravitational_acceleration(other_body,1)[1]
+
+        for body in bodies:
+            body.update(physics_dt)
+
+        for i in range(len(bodies)):
+            for j in range(i + 1, len(bodies)):
+                body = bodies[i]
+                other_body = bodies[j]
+
+                if body.check_collision(other_body):
+                    if body.is_approaching(other_body):
+                        body.apply_collision_impulse(other_body)
+                    body.correct_position(other_body)
 
         accumulator -= physics_dt
 
+    kinetic_energy = 0
 
-    kinetic_energy = (
-        (1/2) * ball.mass * (ball.velocity_x**2 + ball.velocity_y**2)
-        + (1/2) * ball_2.mass * (ball_2.velocity_x**2 + ball_2.velocity_y**2)
-    )
+    for body in bodies:
+        kinetic_energy += (
+            (1/2) * body.mass
+            * (body.velocity_x**2 + body.velocity_y**2)
+        )
 
-    potential_energy = (
-        -(1 * ball.mass * ball_2.mass)
-        / ball.gravitational_acceleration(ball_2, 1)[2]
-    )
+    potential_energy = 0
+
+    for i in range(len(bodies)):
+        for j in range(i + 1, len(bodies)):
+            body = bodies[i]
+            other_body = bodies[j]
+
+            distance = body.gravitational_acceleration(other_body, 1)[2]
+
+            potential_energy += (-(1 * body.mass * other_body.mass)/distance)
 
     total_energy = kinetic_energy + potential_energy
     print(total_energy)
@@ -190,18 +225,12 @@ while run:
 
     win.fill((0,0,0))
 
-    pygame.draw.circle(
-        surface=win,
-        color=(255,0,0),
-        center=(ball.x*meter_to_pixel,screen_y-ball.y*meter_to_pixel),
-        radius=ball.radius*meter_to_pixel
-    )
-
-    pygame.draw.circle(
-        surface=win,
-        color=(255,0,0),
-        center=(ball_2.x*meter_to_pixel,screen_y-ball_2.y*meter_to_pixel),
-        radius=ball_2.radius*meter_to_pixel
-    )
+    for body in bodies:
+        pygame.draw.circle(
+            surface=win,
+            color=(255,0,0),
+            center=(body.x*meter_to_pixel,screen_y-body.y*meter_to_pixel),
+            radius=body.radius*meter_to_pixel
+        )
 
     pygame.display.flip()
