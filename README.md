@@ -25,3 +25,19 @@ that particular result came from single trial of simulation with particular init
 Hello there. I decided that I should write about why and how the code and engine are changed overtime when I face a problem. I am writing it while having a break from coding part, and as the part I am working on right now isn't ready, I haven't committed it. For situational awareness, I will be giving some information about the thing, I am working on right now: 2.5D environment is the main focus of the project right now. the physics engine itself is genuinely 3D (real gravity, real motion, real collisions in three dimensions). "2.5D" refers specifically to the rendering approach still to come, where 3D positions will be projected onto a flat 2D screen rather than rendered with a true 3D camera.
 
 The hardest part until now was adapting orbital_velocity() method; therefore, i will be talking about it after now. Previously, orbital_velocity() was finding a perpendicular direction with a pragmatic solution: swap the two components of the center-to-body vector and flip the sign of one. visually (-distance_y, distance_x). It is obvious that switching to 3D simulation broke this, since "perpendicular to a vector" isn't a single direction in 3D. It’s basically a whole plane of possible directions, because there are infinitely many vectors that can be perpendicular to a given vector in 3D. (Leaving this as a work in progress for tonight. I need to get some sleep and will finish it up tomorrow.)
+
+8/25/2026 [2:00 AM UTC+4]
+After a long break, I am back. it is the contination of my first design note:
+with all this information considered, only two options came to my mind: giving each body's orbital plane a small random tilt, or using a fixed reference axis for every body. first option would give more visual variety, I admit, but the tilt itself would be arbitrary, not caused by anything the simulation actually did, just injected in from outside. and that goes against the same principle I've been following since the observations entry (same reasoning as with the binary/ejection case): there is no coding saying "tilt this randomly", so i shouldn't add one. therefore, second option: one shared, fixed reference axis for every body. gives a flat orbital disk instead of tilted ones, but nothing arbitrary gets added on top of what the physics already gives.
+
+mechanism itself is a cross product. by crossing the body's position vector (relative to the barycenter) with the fixed reference axis, (0,0,1), you get a new vector that is guaranteed perpendicular to both of the originals, which puts it exactly where it needs to be, somewhere in the plane perpendicular to "up".
+
+I worked through the general cross product formula by hand, substituted this specific reference axis in, and simplified it down. small thing fell out of it that i wasn't expecting but was happy about: resulting z-component of the new vector came out to exactly zero. this works as a nice built-in check, because it means, if a body is already lying in the shared flat plane, the formula correctly gives it a direction that also stays in that plane, consistent with the flat-disk design, and not just something that happened to look right by luck. let me also write it down:
+
+General 3D cross product of a = (a1,a2,a3) and b = (b1,b2,b3) is a * b = (a2/*b3 − a3/*b2,  a3/*b1 − a1/*b3,  a1/*b2 − a2/*b1). if we consider a = (distance_x, distance_y, distance_z) and fixed axis as b = (0,0,1), every component will be like this: 
+
+x-component: distance_y/*1 − distance_z/*0 = distance_y
+y-component: distance_z/*0 − distance_x/*1 = −distance_x
+z-component: distance_x/*0 − distance_y/*0 = 0
+
+So the raw direction vector is (distance_y, -distance_x, 0). Of course, it still needs to be divided by its own length before it is a usable unit direction. These all still haven't coded, but in theory, should work.  
