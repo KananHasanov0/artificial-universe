@@ -137,10 +137,10 @@ class Body:
         other.y += other_correction_y
 
 pygame.init()
-screen_x, screen_y = 400, 300
+screen_x, screen_y = 800, 800
 win = pygame.display.set_mode((screen_x, screen_y))
 meter_to_pixel = 2
-
+G = 1
 fps = 240
 physics_dt = 1 / 120
 
@@ -148,21 +148,55 @@ clock = pygame.time.Clock()
 
 run = True
 bodies = []
+num_bodies = 6
+central_radius = random.randint(10,30)
+central_body = Body(200, 200,0, 0, 0, 0, central_radius, random.randint(5,7), 0.8, [0,0,0])
 
-ball = Body(30, 70, 0, 0, 6, 1, 0.8, [0,0])
-ball_2 = Body(80, 70, 0, 0, 10, 1, 0.8, [0,0])
-ball_3 = Body(50, 90, 0, 0, 4, 1, 0.8, [0,0])
-ball_4 = Body(30, 90, 0, 0, 5, 0.5, 0.8, [0,0])
+bodies.append(central_body)
 
-bodies.append(ball)
-bodies.append(ball_2)
-bodies.append(ball_3)
-bodies.append(ball_4)
+for body in range(num_bodies):
+    angle = random.uniform(0, 2*math.pi)
+    distance = random.randint(central_radius+40, 150)
+    x = central_body.x + distance * math.cos(angle)
+    y = central_body.y + distance * math.sin(angle)
+    radius = random.randint(1, 8)
+    density = random.randint(1, 3)
+    bodies.append(Body(x, y, 0, 0, 0, 0, radius, density, 0.8, [0,0,0]))
 
-ball.velocity_x, ball.velocity_y = ball.orbital_velocity(ball_2, 1)
-ball_2.velocity_x, ball_2.velocity_y = ball_2.orbital_velocity(ball, 1)
-ball_3.velocity_x, ball_3.velocity_y = ball_3.orbital_velocity(ball_2, 1)
-ball_4.velocity_x, ball_4.velocity_y = ball_4.orbital_velocity(ball_2, 1)
+central_body.velocity_x = 0
+central_body.velocity_y = 0
+
+initialized = {0}
+max_iterations = len(bodies)*2
+iterations = 0
+
+while len(initialized) < len(bodies) and iterations < max_iterations:
+    iterations += 1
+
+    for body in range(1, len(bodies)):
+        if body in initialized:
+            continue
+
+        winner = None
+
+        for other_body in range(len(bodies)):
+            if other_body == body:
+                continue
+
+            if winner == None:
+                winner = other_body
+            else:
+                if bodies[body].gravitational_acceleration(bodies[other_body], G)[4] > bodies[body].gravitational_acceleration(bodies[winner], G)[4]:
+                    winner = other_body
+
+        if winner in initialized:
+            local_velocity_x, local_velocity_y, local_velocity_z = bodies[body].orbital_velocity(bodies[winner], G)
+
+            bodies[body].velocity_x = local_velocity_x + bodies[winner].velocity_x
+            bodies[body].velocity_y = local_velocity_y + bodies[winner].velocity_y
+            bodies[body].velocity_z = local_velocity_z + bodies[winner].velocity_z
+
+            initialized.add(body)
 
 accumulator = 0
 
@@ -217,7 +251,6 @@ while run:
             potential_energy += (-(1 * body.mass * other_body.mass)/distance)
 
     total_energy = kinetic_energy + potential_energy
-    print(total_energy)
 
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
