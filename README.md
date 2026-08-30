@@ -3,7 +3,7 @@ A computational ecosystem exploring the emergence of adaptive behavior.
 
 ## Overview
 
-![Simulation screenshot showing selected body, orbit path, trail, and inspection panel](assets/simulation-demo.png)
+<img src="assets/simulation-demo.png" alt="Simulation screenshot showing selected body, orbit path, trail, and inspection panel" width="600">
 
 Beginning from scratch, this N-body physics simulation creates gravity, motion, and collision detection based upon fundamental principles instead of using a pre-existing physics library. The program models a small number of masses orbiting around a central body in three-dimensional space; a real time visualizer allows the user to see how the system evolves over time.
 
