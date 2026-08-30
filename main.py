@@ -14,6 +14,8 @@ class Body:
         self.density = density
         self.restitution = restitution
         self.total_acceleration = total_acceleration
+        self.orbiting = None
+        self.trail = []
         
 
         self.volume = 4/3 * math.pi * (self.radius**3)
@@ -146,20 +148,21 @@ class Body:
 
         if penetration <= 0:
             return
-        
+
+        correction_percent = 1.0
         normal_x = self.get_collision_normal(other)[0]
         normal_y = self.get_collision_normal(other)[1]
         normal_z = self.get_collision_normal(other)[2]
         self_fraction = other.mass/(self.mass+other.mass)
         other_fraction = self.mass/(other.mass+self.mass)
 
-        self_correction_x = penetration * self_fraction * normal_x
-        self_correction_y = penetration * self_fraction * normal_y
-        self_correction_z = penetration * self_fraction * normal_z
+        self_correction_x = penetration * self_fraction * normal_x * correction_percent
+        self_correction_y = penetration * self_fraction * normal_y * correction_percent
+        self_correction_z = penetration * self_fraction * normal_z * correction_percent
 
-        other_correction_x = penetration * other_fraction * normal_x
-        other_correction_y = penetration * other_fraction * normal_y
-        other_correction_z = penetration * other_fraction *normal_z
+        other_correction_x = penetration * other_fraction * normal_x * correction_percent
+        other_correction_y = penetration * other_fraction * normal_y * correction_percent
+        other_correction_z = penetration * other_fraction *normal_z * correction_percent
 
         self.x -= self_correction_x
         self.y -= self_correction_y
@@ -172,17 +175,28 @@ class Body:
 pygame.init()
 screen_x, screen_y = 800, 800
 win = pygame.display.set_mode((screen_x, screen_y))
+font = pygame.font.Font(None, 24)
 meter_to_pixel = 2
 G = 1
 fps = 240
-physics_dt = 1 / 120
+physics_dt = 1 / 240
+
+min_brightness = 100
+max_brightness = 255
+
+panel_x = 10
+panel_y = 10
+panel_width = 200
+panel_height = 210
+panel_dragging = False
+panel_drag_offset_x, panel_drag_offset_y = 0, 0
 
 clock = pygame.time.Clock()
 
 run = True
 bodies = []
 num_bodies = 6
-central_radius = random.randint(10,30)
+central_radius = random.randint(17,30)
 central_body = Body(200, 200,0, 0, 0, 0, central_radius, random.randint(5,7), 0.8, [0,0,0])
 
 bodies.append(central_body)
@@ -192,9 +206,10 @@ for body in range(num_bodies):
     distance = random.randint(central_radius+40, 150)
     x = central_body.x + distance * math.cos(angle)
     y = central_body.y + distance * math.sin(angle)
-    radius = random.randint(1, 8)
+    z = random.randint(-30, 30)
+    radius = random.randint(3, 10)
     density = random.randint(1, 3)
-    bodies.append(Body(x, y, 0, 0, 0, 0, radius, density, 0.8, [0,0,0]))
+    bodies.append(Body(x, y, z, 0, 0, 0, radius, density, 0.8, [0,0,0]))
 
 central_body.velocity_x = 0
 central_body.velocity_y = 0
@@ -224,7 +239,7 @@ while len(initialized) < len(bodies) and iterations < max_iterations:
 
         if winner in initialized:
             local_velocity_x, local_velocity_y, local_velocity_z = bodies[body].orbital_velocity(bodies[winner], G)
-
+            bodies[body].orbiting = bodies[winner]
             bodies[body].velocity_x = local_velocity_x + bodies[winner].velocity_x
             bodies[body].velocity_y = local_velocity_y + bodies[winner].velocity_y
             bodies[body].velocity_z = local_velocity_z + bodies[winner].velocity_z
@@ -232,6 +247,9 @@ while len(initialized) < len(bodies) and iterations < max_iterations:
             initialized.add(body)
 
 accumulator = 0
+selected_body = None
+camera_angle = 0
+dragging = False
 
 while run:
     dt = clock.tick(fps)
@@ -286,18 +304,225 @@ while run:
 
     total_energy = kinetic_energy + potential_energy
 
+
+
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
             run = False
+        if e.type == pygame.MOUSEBUTTONUP:
+            dragging = False
+            panel_dragging = False
+        if e.type == pygame.MOUSEBUTTONDOWN:
+            if e.button == 3:
+                selected_body = None
+                print(selected_body)
+                continue
+
+            
+
+            clicked_body = None
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+
+            if selected_body:
+                if panel_x < mouse_x < panel_x +panel_width and panel_y < mouse_y < panel_y + panel_height:
+                    panel_drag_offset_x = mouse_x - panel_x
+                    panel_drag_offset_y = mouse_y - panel_y 
+                    panel_dragging = True
+                    print(panel_dragging)
+                    continue
+            for body in bodies:
+                relative_x = body.x - central_body.x
+                relative_z = body.z - central_body.z
+
+                rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
+
+                screen_body_x = screen_x/2 + rotated_x*meter_to_pixel
+                screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel
+
+                if math.sqrt((mouse_x-screen_body_x)**2 + (mouse_y-screen_body_y)**2) <= body.radius*meter_to_pixel:
+                    clicked_body = body
+            
+            if clicked_body == None:
+                dragging = True
+            elif clicked_body == selected_body:
+                selected_body = None
+            else:
+                selected_body = clicked_body
+
+
+            print(selected_body)
+
+
+    dx, dy = pygame.mouse.get_rel()
+
+    if dragging == True:
+        camera_angle += dx * 0.003
+                
+
 
     win.fill((0,0,0))
 
+    bodies_with_depth = []
+
+    min_z = None
+    max_z = None
+
     for body in bodies:
+        relative_x = body.x - central_body.x
+        relative_z = body.z - central_body.z
+
+        rotated_z = -relative_x*math.sin(camera_angle) + relative_z*math.cos(camera_angle)
+
+        bodies_with_depth.append((body, rotated_z))
+
+        if min_z == None:
+            min_z = rotated_z
+            max_z = rotated_z
+        else:
+            if rotated_z < min_z:
+                min_z = rotated_z
+            if rotated_z > max_z:
+                max_z = rotated_z
+
+    bodies_with_depth.sort(key=lambda pair: pair[1])
+
+
+    for body, rotated_z in bodies_with_depth:
+        relative_x = body.x - central_body.x
+        relative_z = body.z - central_body.z
+
+        rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
+
+        screen_body_x = screen_x/2 + rotated_x*meter_to_pixel
+        screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel
+
+        if max_z != min_z:
+            depth_fraction = (rotated_z - min_z) / (max_z - min_z)
+        else:
+            depth_fraction = 1
+
+        brightness = min_brightness + depth_fraction * (max_brightness - min_brightness)
+
         pygame.draw.circle(
             surface=win,
-            color=(255,0,0),
-            center=(body.x*meter_to_pixel,screen_y-body.y*meter_to_pixel),
+            color=(brightness, 0, 0),
+            center=(screen_body_x, screen_body_y),
             radius=body.radius*meter_to_pixel
         )
+
+
+        if body == selected_body:
+            if len(body.trail) >= 150:
+                body.trail.pop(0)
+            body.trail.append((screen_body_x,screen_body_y))
+            trail_surface = pygame.Surface((screen_x, screen_y), pygame.SRCALPHA)
+
+            for index, point in enumerate(selected_body.trail):
+                if index == len(selected_body.trail) - 1:
+                    continue
+
+                fraction = index / len(selected_body.trail)
+                opacity = int(fraction * 200)
+
+                pygame.draw.line(trail_surface, (0, 255, 0, opacity), selected_body.trail[index], selected_body.trail[index + 1], 3)
+            win.blit(trail_surface, (0, 0))
+
+
+            gap = body.radius * meter_to_pixel + 10
+            bracket_len = 10
+
+            top_left = (screen_body_x - gap, screen_body_y - gap)
+            top_right = (screen_body_x + gap, screen_body_y - gap)
+            bottom_left = (screen_body_x - gap, screen_body_y + gap)
+            bottom_right = (screen_body_x + gap, screen_body_y + gap)
+
+            pygame.draw.line(win, (255, 255, 255), top_left, (top_left[0] + bracket_len, top_left[1]), 2)
+            pygame.draw.line(win, (255, 255, 255), top_left, (top_left[0], top_left[1] + bracket_len), 2)
+
+            pygame.draw.line(win, (255, 255, 255), top_right, (top_right[0] - bracket_len, top_right[1]), 2)
+            pygame.draw.line(win, (255, 255, 255), top_right, (top_right[0], top_right[1] + bracket_len), 2)
+
+            pygame.draw.line(win, (255, 255, 255), bottom_left, (bottom_left[0] + bracket_len, bottom_left[1]), 2)
+            pygame.draw.line(win, (255, 255, 255), bottom_left, (bottom_left[0], bottom_left[1] - bracket_len), 2)
+
+            pygame.draw.line(win, (255, 255, 255), bottom_right, (bottom_right[0] - bracket_len, bottom_right[1]), 2)
+            pygame.draw.line(win, (255, 255, 255), bottom_right, (bottom_right[0], bottom_right[1] - bracket_len), 2)
+
+
+            speed = math.sqrt(body.velocity_x**2 + body.velocity_y**2 + body.velocity_z**2)
+            if speed != 0:
+                direction_x = body.velocity_x / speed
+                direction_y = body.velocity_y / speed
+                direction_z = body.velocity_z / speed
+
+                arrow_length = min(speed*2, 80)
+
+                rotated_dir_x = direction_x*math.cos(camera_angle) + direction_z*math.sin(camera_angle)
+                rotated_dir_y = -direction_y
+
+                arrow_end_x = screen_body_x + rotated_dir_x * arrow_length
+                arrow_end_y = screen_body_y + rotated_dir_y * arrow_length
+
+                reverse_x = -rotated_dir_x
+                reverse_y = -rotated_dir_y
+
+                angle = math.radians(35)
+
+                wing1_x = reverse_x*math.cos(angle) - reverse_y*math.sin(angle)
+                wing1_y = reverse_x*math.sin(angle) + reverse_y*math.cos(angle)
+
+                wing1_end_x = arrow_end_x + wing1_x * 10
+                wing1_end_y = arrow_end_y + wing1_y * 10
+
+                wing2_x = reverse_x*math.cos(-angle) - reverse_y*math.sin(-angle)
+                wing2_y = reverse_x*math.sin(-angle) + reverse_y*math.cos(-angle)
+
+                wing2_end_x = arrow_end_x + wing2_x * 10
+                wing2_end_y = arrow_end_y + wing2_y * 10
+
+                
+
+
+                pygame.draw.line(win, (0, 255, 0), (screen_body_x, screen_body_y), (arrow_end_x, arrow_end_y), 4)
+                pygame.draw.line(win, (0, 255, 0), (arrow_end_x, arrow_end_y), (wing1_end_x, wing1_end_y), 3)
+                pygame.draw.line(win, (0, 255, 0), (arrow_end_x, arrow_end_y), (wing2_end_x, wing2_end_y), 3)
+
+
+            if selected_body.orbiting != None:
+                relative_x = selected_body.orbiting.x - central_body.x
+                relative_z = selected_body.orbiting.z - central_body.z
+
+                rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
+
+                orbited_screen_x = screen_x/2 + rotated_x*meter_to_pixel
+                orbited_screen_y = screen_y/2 - (selected_body.orbiting.y - central_body.y)*meter_to_pixel
+
+                line_surface = pygame.Surface((screen_x, screen_y), pygame.SRCALPHA)
+                pygame.draw.line(line_surface, (255,255,255, 150), (screen_body_x, screen_body_y), (orbited_screen_x, orbited_screen_y), 3)
+                win.blit(line_surface, (0,0))
+
+
+    if panel_dragging == True:
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        panel_x = mouse_x - panel_drag_offset_x
+        panel_y = mouse_y - panel_drag_offset_y
+    
+    if selected_body != None:
+        speed = math.sqrt(selected_body.velocity_x**2 + selected_body.velocity_y**2 + selected_body.velocity_z**2)
+        stats = [('Mass', selected_body.mass), ('X', selected_body.x), ('Y', selected_body.y), ('Z', selected_body.z), ('Radius', selected_body.radius),('Velocity X', selected_body.velocity_x), ('Velocity Y', selected_body.velocity_y), ('Velocity Z', selected_body.velocity_z), ('Speed', speed)]
+        panel_surface = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        pygame.draw.rect(panel_surface, (255, 255, 255, 150), (0,0,panel_width, panel_height), border_radius=10)
+        win.blit(panel_surface, (panel_x, panel_y))
+        pygame.draw.rect(win, (90,90,90), (panel_x,panel_y,panel_width,panel_height), width=3, border_radius=10)
+
+        for index, (label, value) in enumerate(stats):
+            line_text = f"{label}: {round(value, 2)}"
+            line_surface = font.render(line_text, True, (0, 0, 0))
+            win.blit(line_surface, (panel_x + 10, panel_y + 10 + index*20))
+
+        exit_info = font.render("Right-click to close", True, (30, 30, 30))
+        win.blit(exit_info, (panel_x +20, panel_y + panel_height - 22))
+
+    
 
     pygame.display.flip()
