@@ -3,6 +3,8 @@ A computational ecosystem exploring the emergence of adaptive behavior.
 
 ## Overview
 
+![Simulation screenshot showing selected body, orbit path, trail, and inspection panel](assets/simulation-demo.png)
+
 Beginning from scratch, this N-body physics simulation creates gravity, motion, and collision detection based upon fundamental principles instead of using a pre-existing physics library. The program models a small number of masses orbiting around a central body in three-dimensional space; a real time visualizer allows the user to see how the system evolves over time.
 
 The question driving this project is whether a structured system like orbits will emerge from a few, basic physical principles without having the structure defined in the program. This is not about programming a simulated solar system but rather providing the program with an appropriate environment for gravity (force), mass and motion so that it may produce structures autonomously.
