@@ -1,13 +1,31 @@
 # artificial-universe
 A computational ecosystem exploring the emergence of adaptive behavior.
 
-## Overview
+<img src="assets/simulation-demo.png" alt="Simulation screenshot showing selected body, orbit path, trail, and inspection panel" width="600">
 
-![Simulation screenshot showing selected body, orbit path, trail, and inspection panel](assets/simulation-demo.png)
+## Overview
 
 Beginning from scratch, this N-body physics simulation creates gravity, motion, and collision detection based upon fundamental principles instead of using a pre-existing physics library. The program models a small number of masses orbiting around a central body in three-dimensional space; a real time visualizer allows the user to see how the system evolves over time.
 
 The question driving this project is whether a structured system like orbits will emerge from a few, basic physical principles without having the structure defined in the program. This is not about programming a simulated solar system but rather providing the program with an appropriate environment for gravity (force), mass and motion so that it may produce structures autonomously.
+
+## How to Run
+
+**Dependencies** — Only library you need to install is pygame. This can be done with writing down this install command in terminal:
+```
+pip install pygame
+```
+
+**How to run** — In terminal write this command:
+```
+python main.py
+```
+
+**Controls:**
+- **Left-click a body** to select it. This opens a panel showing that body's stats, highlights it with targeting brackets, shows its direction with an arrow, and draws a line to whatever it orbits.
+- **Left-click the same body again** to deselect it.
+- **Right-click anywhere** on the screen to close the panel.
+- **Drag while holding left-click** on empty space to rotate the camera. Drag while your mouse is on the panel to move it.
 
 ## Physics Engine
 
@@ -99,7 +117,4 @@ If we consider `a = (distance_x, distance_y, distance_z)` and fixed axis as `b =
 | z | distance_x × 0 − distance_y × 0 | 0 |
 
 So the raw direction vector is `(distance_y, -distance_x, 0)`. Of course, it still needs to be divided by its own length before it is a usable unit direction.
-
-*These all still haven't coded, but in theory, should work.*
-
 
