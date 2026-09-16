@@ -1,6 +1,8 @@
 import pygame
 import math
 import random
+import seaborn
+import matplotlib.pyplot as plt
 
 class Body:
     def __init__(self,x,y,z,velocity_x,velocity_y,velocity_z,radius,density,restitution,total_acceleration):
@@ -176,11 +178,13 @@ pygame.init()
 screen_x, screen_y = 800, 800
 win = pygame.display.set_mode((screen_x, screen_y))
 font = pygame.font.Font(None, 24)
-meter_to_pixel = 2
-G = 1
+meter_to_pixel = 800/5e11
+radius_to_pixel = 3e-7
+G = 6.674e-11
 fps = 240
 physics_dt = 1 / 240
-
+time_scale = 2e6
+zoom = 1.0
 min_brightness = 100
 max_brightness = 255
 
@@ -196,19 +200,19 @@ clock = pygame.time.Clock()
 run = True
 bodies = []
 num_bodies = 6
-central_radius = random.randint(17,30)
-central_body = Body(200, 200,0, 0, 0, 0, central_radius, random.randint(5,7), 0.8, [0,0,0])
+central_radius = random.uniform(5.9e8, 8.0e8)
+central_body = Body(0, 0, 0, 0, 0, 0, central_radius, random.randint(1200, 1600), 0.8, [0,0,0])
 
 bodies.append(central_body)
 
 for body in range(num_bodies):
     angle = random.uniform(0, 2*math.pi)
-    distance = random.randint(central_radius+40, 150)
+    distance = random.uniform(6e10, 5e11)
     x = central_body.x + distance * math.cos(angle)
     y = central_body.y + distance * math.sin(angle)
-    z = random.randint(-30, 30)
-    radius = random.randint(3, 10)
-    density = random.randint(1, 3)
+    z = random.uniform(-1e10, 1e10)
+    radius = random.uniform(10e6,10e7)
+    density = random.randint(3000,5500)
     bodies.append(Body(x, y, z, 0, 0, 0, radius, density, 0.8, [0,0,0]))
 
 central_body.velocity_x = 0
@@ -250,8 +254,17 @@ accumulator = 0
 selected_body = None
 camera_angle = 0
 dragging = False
+simulated_time = 0
+E0 = None
+
+listed_energy = []
+deviation_list = []
+baseline = None
+was_abnormal = False
+last_abnormal_event = None
 
 while run:
+    
     dt = clock.tick(fps)
     accumulator += dt / 1000
 
@@ -269,7 +282,7 @@ while run:
                 body.total_acceleration[2] += body.gravitational_acceleration(other_body,G)[2]
 
         for body in bodies:
-            body.update(physics_dt)
+            body.update(physics_dt*time_scale)
 
         for i in range(len(bodies)):
             for j in range(i + 1, len(bodies)):
@@ -282,6 +295,8 @@ while run:
                     body.correct_position(other_body)
 
         accumulator -= physics_dt
+
+        simulated_time+=physics_dt*time_scale
 
     kinetic_energy = 0
 
@@ -303,20 +318,53 @@ while run:
             potential_energy += (-(1 * body.mass * other_body.mass)/distance)
 
     total_energy = kinetic_energy + potential_energy
+    if E0 == None:
+        E0 = total_energy
+
+
+
+    normalized_deviation = (total_energy-E0)/abs(E0)
+
+    listed_energy.append([simulated_time/86400,normalized_deviation])
+    if len(deviation_list) < 15:
+        deviation_list.append(normalized_deviation)
+    else:
+        baseline = sum(deviation_list) / len(deviation_list)
+        if abs(normalized_deviation - baseline) > 0.01:
+
+            if was_abnormal == False:
+                last_abnormal_event = simulated_time
+                print(last_abnormal_event/86400)
+            was_abnormal = True
+        else:
+            was_abnormal = False
+            print('reseted')
+            deviation_list.pop(0)
+            deviation_list.append(normalized_deviation)
+
+        
+
 
 
 
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
             run = False
+
+        if e.type == pygame.MOUSEWHEEL:
+            zoom += e.y * 0.1
+            zoom = max(zoom, 0.1)
+
         if e.type == pygame.MOUSEBUTTONUP:
             dragging = False
             panel_dragging = False
         if e.type == pygame.MOUSEBUTTONDOWN:
             if e.button == 3:
                 selected_body = None
-                print(selected_body)
+                
                 continue
+
+
 
             
 
@@ -328,7 +376,7 @@ while run:
                     panel_drag_offset_x = mouse_x - panel_x
                     panel_drag_offset_y = mouse_y - panel_y 
                     panel_dragging = True
-                    print(panel_dragging)
+                    
                     continue
             for body in bodies:
                 relative_x = body.x - central_body.x
@@ -336,10 +384,10 @@ while run:
 
                 rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
 
-                screen_body_x = screen_x/2 + rotated_x*meter_to_pixel
-                screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel
+                screen_body_x = screen_x/2 + rotated_x*meter_to_pixel*zoom
+                screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel*zoom
 
-                if math.sqrt((mouse_x-screen_body_x)**2 + (mouse_y-screen_body_y)**2) <= body.radius*meter_to_pixel:
+                if math.sqrt((mouse_x-screen_body_x)**2 + (mouse_y-screen_body_y)**2) <= body.radius*radius_to_pixel*zoom:
                     clicked_body = body
             
             if clicked_body == None:
@@ -393,8 +441,8 @@ while run:
 
         rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
 
-        screen_body_x = screen_x/2 + rotated_x*meter_to_pixel
-        screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel
+        screen_body_x = screen_x/2 + rotated_x*meter_to_pixel*zoom
+        screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel*zoom
 
         if max_z != min_z:
             depth_fraction = (rotated_z - min_z) / (max_z - min_z)
@@ -407,12 +455,12 @@ while run:
             surface=win,
             color=(brightness, 0, 0),
             center=(screen_body_x, screen_body_y),
-            radius=body.radius*meter_to_pixel
+            radius=body.radius*radius_to_pixel*zoom
         )
 
 
         if body == selected_body:
-            if len(body.trail) >= 150:
+            if len(body.trail) >= 250:
                 body.trail.pop(0)
             body.trail.append((screen_body_x,screen_body_y))
             trail_surface = pygame.Surface((screen_x, screen_y), pygame.SRCALPHA)
@@ -428,7 +476,7 @@ while run:
             win.blit(trail_surface, (0, 0))
 
 
-            gap = body.radius * meter_to_pixel + 10
+            gap = body.radius * radius_to_pixel*zoom + 10
             bracket_len = 10
 
             top_left = (screen_body_x - gap, screen_body_y - gap)
@@ -455,7 +503,7 @@ while run:
                 direction_y = body.velocity_y / speed
                 direction_z = body.velocity_z / speed
 
-                arrow_length = min(speed*2, 80)
+                arrow_length = min(speed*2/1000, 80)
 
                 rotated_dir_x = direction_x*math.cos(camera_angle) + direction_z*math.sin(camera_angle)
                 rotated_dir_y = -direction_y
@@ -494,8 +542,8 @@ while run:
 
                 rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
 
-                orbited_screen_x = screen_x/2 + rotated_x*meter_to_pixel
-                orbited_screen_y = screen_y/2 - (selected_body.orbiting.y - central_body.y)*meter_to_pixel
+                orbited_screen_x = screen_x/2 + rotated_x*meter_to_pixel*zoom
+                orbited_screen_y = screen_y/2 - (selected_body.orbiting.y - central_body.y)*meter_to_pixel*zoom
 
                 line_surface = pygame.Surface((screen_x, screen_y), pygame.SRCALPHA)
                 pygame.draw.line(line_surface, (255,255,255, 150), (screen_body_x, screen_body_y), (orbited_screen_x, orbited_screen_y), 3)
@@ -526,3 +574,14 @@ while run:
     
 
     pygame.display.flip()
+
+
+
+time = []
+energy = []
+for i in listed_energy:
+    time.append(i[0])
+    energy.append(i[1])
+
+seaborn.lineplot(x=time, y=energy)
+plt.show()
