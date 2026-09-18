@@ -184,7 +184,7 @@ G = 6.674e-11
 fps = 240
 physics_dt = 1 / 240
 time_scale = 2e6
-zoom = 1.0
+zoom = 0.6
 min_brightness = 100
 max_brightness = 255
 
@@ -199,7 +199,7 @@ clock = pygame.time.Clock()
 
 run = True
 bodies = []
-num_bodies = 6
+num_bodies = 10
 central_radius = random.uniform(5.9e8, 8.0e8)
 central_body = Body(0, 0, 0, 0, 0, 0, central_radius, random.randint(1200, 1600), 0.8, [0,0,0])
 
@@ -259,97 +259,170 @@ E0 = None
 
 listed_energy = []
 deviation_list = []
+abnormal_events = []
+replay_buffer = []
 baseline = None
 was_abnormal = False
+paused = False
 last_abnormal_event = None
+clicked_event = None
+selected_event = None
+event_replays = []
+recording_after = False
+after_frames_remaining = 0
+current_event_snapshot = None
 
 while run:
     
     dt = clock.tick(fps)
-    accumulator += dt / 1000
+    
+    if paused == False:
+        accumulator += dt / 1000
+        while accumulator >= physics_dt:
 
-    while accumulator >= physics_dt:
+            for body in bodies:
+                body.total_acceleration = [0,0,0]
+
+                for other_body in bodies:
+                    if other_body == body:
+                        continue
+
+                    body.total_acceleration[0] += body.gravitational_acceleration(other_body,G)[0]
+                    body.total_acceleration[1] += body.gravitational_acceleration(other_body,G)[1]
+                    body.total_acceleration[2] += body.gravitational_acceleration(other_body,G)[2]
+
+            for body in bodies:
+                body.update(physics_dt*time_scale)
+
+            for i in range(len(bodies)):
+                for j in range(i + 1, len(bodies)):
+                    body = bodies[i]
+                    other_body = bodies[j]
+
+                    if body.check_collision(other_body):
+                        if body.is_approaching(other_body):
+                            body.apply_collision_impulse(other_body)
+                        body.correct_position(other_body)
+
+            accumulator -= physics_dt
+
+            simulated_time+=physics_dt*time_scale
+
+        kinetic_energy = 0
 
         for body in bodies:
-            body.total_acceleration = [0,0,0]
+            kinetic_energy += (
+                (1/2) * body.mass
+                * (body.velocity_x**2 + body.velocity_y**2 + body.velocity_z**2)
+            )
 
-            for other_body in bodies:
-                if other_body == body:
-                    continue
-
-                body.total_acceleration[0] += body.gravitational_acceleration(other_body,G)[0]
-                body.total_acceleration[1] += body.gravitational_acceleration(other_body,G)[1]
-                body.total_acceleration[2] += body.gravitational_acceleration(other_body,G)[2]
-
-        for body in bodies:
-            body.update(physics_dt*time_scale)
+        potential_energy = 0
 
         for i in range(len(bodies)):
             for j in range(i + 1, len(bodies)):
                 body = bodies[i]
                 other_body = bodies[j]
 
-                if body.check_collision(other_body):
-                    if body.is_approaching(other_body):
-                        body.apply_collision_impulse(other_body)
-                    body.correct_position(other_body)
+                distance = body.gravitational_acceleration(other_body, G)[3]
 
-        accumulator -= physics_dt
+                potential_energy += (-(1 * body.mass * other_body.mass)/distance)
 
-        simulated_time+=physics_dt*time_scale
-
-    kinetic_energy = 0
-
-    for body in bodies:
-        kinetic_energy += (
-            (1/2) * body.mass
-            * (body.velocity_x**2 + body.velocity_y**2 + body.velocity_z**2)
-        )
-
-    potential_energy = 0
-
-    for i in range(len(bodies)):
-        for j in range(i + 1, len(bodies)):
-            body = bodies[i]
-            other_body = bodies[j]
-
-            distance = body.gravitational_acceleration(other_body, G)[3]
-
-            potential_energy += (-(1 * body.mass * other_body.mass)/distance)
-
-    total_energy = kinetic_energy + potential_energy
-    if E0 == None:
-        E0 = total_energy
+        total_energy = kinetic_energy + potential_energy
+        if E0 == None:
+            E0 = total_energy
 
 
 
-    normalized_deviation = (total_energy-E0)/abs(E0)
+        normalized_deviation = (total_energy-E0)/abs(E0)
 
-    listed_energy.append([simulated_time/86400,normalized_deviation])
-    if len(deviation_list) < 15:
-        deviation_list.append(normalized_deviation)
-    else:
-        baseline = sum(deviation_list) / len(deviation_list)
-        if abs(normalized_deviation - baseline) > 0.01:
-
-            if was_abnormal == False:
-                last_abnormal_event = simulated_time
-                print(last_abnormal_event/86400)
-            was_abnormal = True
-        else:
-            was_abnormal = False
-            print('reseted')
-            deviation_list.pop(0)
+        listed_energy.append([simulated_time/86400,normalized_deviation])
+        if len(deviation_list) < 15:
             deviation_list.append(normalized_deviation)
+        else:
+            baseline = sum(deviation_list) / len(deviation_list)
+            if abs(normalized_deviation - baseline) > 0.02:
+
+                if was_abnormal == False:
+                    last_abnormal_event = simulated_time
+                    if len(abnormal_events) > 0:
+                        if last_abnormal_event - abnormal_events[-1] > 3600:
+                            abnormal_events.append(last_abnormal_event)
+                            current_event_snapshot = list(replay_buffer)
+                            recording_after = True
+                            after_frames_remaining = 3600
+                    else:
+                        abnormal_events.append(last_abnormal_event)
+                        current_event_snapshot = list(replay_buffer)
+                        recording_after = True
+                        after_frames_remaining = 3600
+                    
+                was_abnormal = True
+
+            else:
+                was_abnormal = False
+                
+                deviation_list.pop(0)
+                deviation_list.append(normalized_deviation)
+        if after_frames_remaining == 0 and recording_after == True:
+            recording_after = False
+            event_replays.append(current_event_snapshot)
+        if len(replay_buffer) < 3600:
+            all_bodies_coordinates = []
+            for body in bodies:
+                all_bodies_coordinates.append((body.x,body.y,body.z))
+
+            replay_buffer.append(all_bodies_coordinates)
+            if recording_after == True:
+                current_event_snapshot.append(all_bodies_coordinates)
+                after_frames_remaining -= 1
+        else:
+            all_bodies_coordinates = []
+            replay_buffer.pop(0)
+            for body in bodies:
+                all_bodies_coordinates.append((body.x,body.y,body.z))
+            replay_buffer.append(all_bodies_coordinates)
+
+            if recording_after == True:
+                current_event_snapshot.append(all_bodies_coordinates)
+                after_frames_remaining -= 1
+
+        
+            
+                
+
+
 
         
 
 
 
-
+    
     for e in pygame.event.get():
+        
         if e.type == pygame.QUIT:
             run = False
+        if e.type == pygame.KEYDOWN:
+
+            if e.key == pygame.K_SPACE:
+                if paused == True:
+                    paused = False
+                else:
+                    paused = True
+
+                    time = []
+                    energy = []
+                    for i in listed_energy:
+                        time.append(i[0])
+                        energy.append(i[1])
+
+                    fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
+                    ax.plot(time, energy)
+                    fig.canvas.draw()
+                    plot_width, plot_height = fig.canvas.get_width_height()
+                    raw_data = fig.canvas.buffer_rgba()
+                    plot_surface = pygame.image.frombuffer(raw_data, (plot_width, plot_height), "RGBA")
+                    plt.close(fig)
+
 
         if e.type == pygame.MOUSEWHEEL:
             zoom += e.y * 0.1
@@ -359,13 +432,116 @@ while run:
             dragging = False
             panel_dragging = False
         if e.type == pygame.MOUSEBUTTONDOWN:
+            
+            if paused == True:
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                if clicked_event != None:
+                    for i, v in enumerate(abnormal_events):
+                
+                        event_x = 110
+                        event_y = 450 + i*20
+                        if event_x < mouse_x < event_x + 200 and event_y < mouse_y < event_y + 16:
+                            if clicked_event == i:
+                                selected_event = i
+                            else:
+                                clicked_event = i
+
+                else:
+                    for i, v in enumerate(abnormal_events):
+                        
+                        event_x = 110
+                        event_y = 450 + i*20
+                        if event_x < mouse_x < event_x + 200 and event_y < mouse_y < event_y + 16:
+                            clicked_event = i
+                if selected_event != None:
+                    cancel_replay = False
+                    if selected_event < len(event_replays):
+                        saved_positions = []
+                        for body in bodies:
+                            saved_positions.append((body.x, body.y, body.z))
+                        replay_data = event_replays[selected_event]
+                        print(f"replay length: {len(replay_data)}")
+                        for frame_index, frame in enumerate(replay_data):
+                            replay_dt = clock.tick(fps)
+                            for i, body in enumerate(bodies):
+                                body.x, body.y, body.z = frame[i]
+
+                            win.fill((0,0,0))       
+
+                            bodies_with_depth = []
+                            min_z = None
+                            max_z = None
+
+                            for body in bodies:
+                                relative_x = body.x - central_body.x
+                                relative_z = body.z - central_body.z
+                                rotated_z = -relative_x*math.sin(camera_angle) + relative_z*math.cos(camera_angle)
+                                bodies_with_depth.append((body, rotated_z))
+
+                                if min_z == None:
+                                    min_z = rotated_z
+                                    max_z = rotated_z
+                                else:
+                                    if rotated_z < min_z:
+                                        min_z = rotated_z
+                                    if rotated_z > max_z:
+                                        max_z = rotated_z
+
+                            bodies_with_depth.sort(key=lambda pair: pair[1])
+
+                            for body, rotated_z in bodies_with_depth:
+                                relative_x = body.x - central_body.x
+                                relative_z = body.z - central_body.z
+                                rotated_x = relative_x*math.cos(camera_angle) + relative_z*math.sin(camera_angle)
+                                screen_body_x = screen_x/2 + rotated_x*meter_to_pixel*zoom
+                                screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel*zoom
+
+                                if max_z != min_z:
+                                    depth_fraction = (rotated_z - min_z) / (max_z - min_z)
+                                else:
+                                    depth_fraction = 1
+
+                                brightness = min_brightness + depth_fraction * (max_brightness - min_brightness)
+
+                                pygame.draw.circle(
+                                    surface=win,
+                                    color=(brightness, 0, 0),
+                                    center=(screen_body_x, screen_body_y),
+                                    radius=body.radius*radius_to_pixel*zoom
+                                )
+
+
+                            seconds_offset = frame_index - 3600
+                            replay_label_text = f"REPLAY  t = {seconds_offset:+d}s"
+                            replay_label_surface = font.render(replay_label_text, True, (255, 255, 255))
+                            win.blit(replay_label_surface, (10, 10))
+
+                            pygame.display.flip()
+                            for replay_e in pygame.event.get():
+                                if replay_e.type == pygame.QUIT:
+                                    run = False
+                                if replay_e.type == pygame.MOUSEWHEEL:
+                                    zoom += replay_e.y * 0.1
+                                    zoom = max(zoom, 0.1)
+                                if replay_e.type == pygame.KEYDOWN:
+                                    if replay_e.key == pygame.K_ESCAPE:
+                                        cancel_replay = True
+                            if run == False or cancel_replay == True:
+                                break       
+
+                        for i, body in enumerate(bodies):
+                            body.x, body.y, body.z = saved_positions[i]
+                    else:
+                        print("Replay still recording, not ready yet")
+
+                            
+
+
             if e.button == 3:
                 selected_body = None
                 
                 continue
-
-
-
+ 
             
 
             clicked_body = None
@@ -387,7 +563,7 @@ while run:
                 screen_body_x = screen_x/2 + rotated_x*meter_to_pixel*zoom
                 screen_body_y = screen_y/2 - (body.y-central_body.y)*meter_to_pixel*zoom
 
-                if math.sqrt((mouse_x-screen_body_x)**2 + (mouse_y-screen_body_y)**2) <= body.radius*radius_to_pixel*zoom:
+                if e.button == 1 and math.sqrt((mouse_x-screen_body_x)**2 + (mouse_y-screen_body_y)**2) <= body.radius*radius_to_pixel*zoom:
                     clicked_body = body
             
             if clicked_body == None:
@@ -398,7 +574,6 @@ while run:
                 selected_body = clicked_body
 
 
-            print(selected_body)
 
 
     dx, dy = pygame.mouse.get_rel()
@@ -571,17 +746,27 @@ while run:
         exit_info = font.render("Right-click to close", True, (30, 30, 30))
         win.blit(exit_info, (panel_x +20, panel_y + panel_height - 22))
 
+    if paused == True:
+        paused_screen = pygame.Surface((screen_x, screen_y), pygame.SRCALPHA)
+        paused_screen.fill((150, 150, 150, 150))
+        win.blit(paused_screen, (0, 0))
+        win.blit(plot_surface, (100, 20))
+        text_x, text_y = 100, 440
+        for index, value in enumerate(abnormal_events):
+            event_text = f"Event {index+1}: {value/86400:.1f} days"
+            if index == clicked_event:
+                if index == selected_event:
+                    line_surface = font.render(event_text, True, (255, 0, 0))
+                else:
+                    line_surface = font.render(event_text, True, (0, 0, 255))
+            else:
+                line_surface = font.render(event_text, True, (0, 0, 0))
+
+            win.blit(line_surface, (text_x + 10, text_y + 10 + index*20))
+
     
 
     pygame.display.flip()
 
 
 
-time = []
-energy = []
-for i in listed_energy:
-    time.append(i[0])
-    energy.append(i[1])
-
-seaborn.lineplot(x=time, y=energy)
-plt.show()
