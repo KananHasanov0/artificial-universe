@@ -11,9 +11,10 @@ The question driving this project is whether a structured system like orbits wil
 
 ## How to Run
 
-**Dependencies** — Only library you need to install is pygame. This can be done with writing down this install command in terminal:
+**Dependencies** — Libraries you need to install are pygame and matplotlib. This can be done with writing down these install commands in terminal:
 ```
 pip install pygame
+pip install matplotlib
 ```
 
 **How to run** — In terminal write this command:
@@ -26,6 +27,10 @@ python main.py
 - **Left-click the same body again** to deselect it.
 - **Right-click anywhere** on the screen to close the panel.
 - **Drag while holding left-click** on empty space to rotate the camera. Drag while your mouse is on the panel to move it.
+- **Scroll wheel** to zoom in and out.
+- **Space bar** to pause and unpause. Pausing opens the pause screen, where the energy plot and the list of found events are.
+- **Left-click an event** in that list once to pick it, then click the same one again to actually open its replay.
+- **Escape while a replay is playing** to stop it and go back to the pause screen.
 
 ## Physics Engine
 
@@ -37,7 +42,13 @@ Currently, this project has been verified as having included a verified 3-D phys
 
 This engine was created using first principles of physics.
 
-The semi-implicit method used for integration was tested against a previously identified failure mode (energy drift caused by explicit Euler's method), and it passed. Therefore, the total energy of the objects within the simulation remains bounded rather than increasing without bound.
+Everything runs on real units now. Masses are in kilograms, calculated from each body's radius and density, distances are in meters, and G is the actual constant, 6.674e-11. Before this the whole thing was toy-scale.
+
+One thing about real units is that real orbital periods take months or years of real seconds, so if you just run it nothing looks like it is moving at all. I added a time_scale constant that multiplies the timestep, so simulated time can run faster than real time. Rendering has two separate scale constants too, one for position and one for radius, both kept apart from the physics. At real proportions one shared scale can't make distances and sizes both visible at the same time, i tried.
+
+The semi-implicit method used for integration was tested against a previously identified failure mode (energy drift caused by explicit Euler's method), and it passed. Total energy stays bounded rather than increasing without bound.
+
+That test was from back when everything was toy-scale though, so i re-did it with real units and time_scale in place. Logged normalized energy deviation every frame over a 13,000 simulated-day run. It stayed in a narrow band for around the first 7,800 days, then shifted into a different, wider band and stayed bounded there too. So not unbounded drift, but i don't have an explanation for the shift itself yet.
 
 Close encounters have also been addressed by applying a softening term to prevent singularities at close encounter points.
 
@@ -52,9 +63,15 @@ Once its "parent" has been determined, the child will inherit all aspects of its
 This system is user interactable via an exploratory 3-dimensional view:
 
 - Camera rotation
+- Zoom
 - Depth sorted rendering
 - Distance based shading
 - A separate panel to display physical data of each object, including their orbital target and velocity vector
+- A pause screen, which stops the simulation without closing it
+
+Pause screen has the energy plot for the run so far, and under it a list of found events. Event here means a moment where total energy went further from its own recent rolling average than a set threshold. Picking one from the list plays back the recorded positions from a window before and after that moment, in the same view, and you can zoom during it or press escape to stop.
+
+Replay itself works from a rolling buffer of recent positions that gets copied when an event is found, then keeps recording for a while after. The speed it plays back at isn't verified to match the speed the frames were recorded at, so that part still needs checking.
 
 ---
 
@@ -118,3 +135,4 @@ If we consider `a = (distance_x, distance_y, distance_z)` and fixed axis as `b =
 
 So the raw direction vector is `(distance_y, -distance_x, 0)`. Of course, it still needs to be divided by its own length before it is a usable unit direction.
 
+*These all still haven't coded, but in theory, should work.*
