@@ -174,6 +174,182 @@ class Body:
         other.y += other_correction_y
         other.z += other_correction_z
 
+    def collision_outcome(self, other, G, max_cone_angle, m_min, fragment_b, min_fragment_radius):
+        (dvx, dvy, dvz) = self.get_relative_velocity(other)
+        reduced_mass_KE = 0.5 * (self.mass * other.mass / (self.mass+other.mass)) * (dvx**2+dvy**2+dvz**2)
+        binding_energy = G * self.mass**2 / self.radius + G * other.mass**2 / other.radius
+        if reduced_mass_KE < binding_energy:
+            return [self.merge(other)]
+        else:
+            return self.fragment(other, G, max_cone_angle, m_min, fragment_b, min_fragment_radius)
+
+    def merge(self, other):
+        new_mass = self.mass + other.mass
+        new_velocity_x = (self.mass*self.velocity_x + other.mass*other.velocity_x) / new_mass
+        new_velocity_y = (self.mass*self.velocity_y + other.mass*other.velocity_y) / new_mass
+        new_velocity_z = (self.mass*self.velocity_z + other.mass*other.velocity_z) / new_mass
+
+        new_x = (self.mass*self.x + other.mass*other.x) / (self.mass + other.mass)
+        new_y = (self.mass*self.y + other.mass*other.y) / (self.mass + other.mass)
+        new_z = (self.mass*self.z + other.mass*other.z) / (self.mass + other.mass)
+
+        new_density = self.density*(self.mass/new_mass) + other.density*(other.mass/new_mass)
+        new_volume = new_mass/new_density
+        new_radius = (3*new_volume/(4*math.pi))**(1/3)
+
+        return Body(new_x, new_y, new_z, new_velocity_x, new_velocity_y, new_velocity_z, new_radius, new_density, 0.8, [0,0,0])
+
+    def fragment(self, other, G, max_cone_angle,m_min, fragment_b, min_fragment_radius):
+        n_x, n_y, n_z = self.get_collision_normal(other)
+        v_x, v_y, v_z = self.get_relative_velocity(other)
+        v_length = math.sqrt(v_x**2 + v_y**2 + v_z**2)
+        v_x = v_x/v_length
+        v_y = v_y/v_length
+        v_z = v_z/v_length
+
+        dot = n_x*v_x + n_y*v_y + n_z*v_z           
+        e1_x = n_x - dot*v_x
+        e1_y = n_y - dot*v_y
+        e1_z = n_z - dot*v_z    
+
+        e1_length = math.sqrt(e1_x**2 + e1_y**2 + e1_z**2)
+        if e1_length < 1e-9:
+            if abs(v_x) < 0.9:
+                e1_x, e1_y, e1_z = 0, v_z, -v_y
+            else:
+                e1_x, e1_y, e1_z = -v_z, 0, v_x
+            e1_length = math.sqrt(e1_x**2 + e1_y**2 + e1_z**2)
+        e1_x = e1_x/e1_length
+        e1_y = e1_y/e1_length
+        e1_z = e1_z/e1_length
+
+        e2_x = v_y*e1_z - v_z*e1_y
+        e2_y = v_z*e1_x - v_x*e1_z
+        e2_z = v_x*e1_y - v_y*e1_x
+
+        (dvx, dvy, dvz) = self.get_relative_velocity(other)
+        reduced_mass_KE = 0.5 * (self.mass * other.mass / (self.mass+other.mass)) * (dvx**2+dvy**2+dvz**2)
+        binding_energy = G * self.mass**2 / self.radius + G * other.mass**2 / other.radius
+        energy_ratio = reduced_mass_KE / binding_energy
+        cone_angle = max_cone_angle * (1 - 1/energy_ratio)
+
+        total_mass = self.mass+other.mass
+        fragment_masses = generate_fragment_masses(total_mass, m_min ,fragment_b)
+        leftover_energy = reduced_mass_KE - binding_energy
+        kick_speed = math.sqrt(2 * leftover_energy / total_mass)
+        com_velocity_x = (self.mass*self.velocity_x + other.mass*other.velocity_x) / total_mass
+        com_velocity_y = (self.mass*self.velocity_y + other.mass*other.velocity_y) / total_mass
+        com_velocity_z = (self.mass*self.velocity_z + other.mass*other.velocity_z) / total_mass
+
+        collision_x = (self.x + other.x) / 2
+        collision_y = (self.y + other.y) / 2
+        collision_z = (self.z + other.z) / 2
+
+        fragment_density = self.density*(self.mass/total_mass) + other.density*(other.mass/total_mass)
+
+        fragments = []
+
+        for i in range(len(fragment_masses)):
+            fragment_mass_i = fragment_masses[i]
+            angle_around = 2 * math.pi * i / len(fragment_masses)
+
+            dir_x = math.cos(cone_angle)*v_x + math.sin(cone_angle)*(math.cos(angle_around)*e1_x + math.sin(angle_around)*e2_x)
+            dir_y = math.cos(cone_angle)*v_y + math.sin(cone_angle)*(math.cos(angle_around)*e1_y + math.sin(angle_around)*e2_y)
+            dir_z = math.cos(cone_angle)*v_z + math.sin(cone_angle)*(math.cos(angle_around)*e1_z + math.sin(angle_around)*e2_z)
+
+            fragment_velocity_x = com_velocity_x + kick_speed*dir_x
+            fragment_velocity_y = com_velocity_y + kick_speed*dir_y
+            fragment_velocity_z = com_velocity_z + kick_speed*dir_z
+
+            fragment_volume_i = fragment_mass_i / fragment_density
+            fragment_radius_i = (3*fragment_volume_i/(4*math.pi))**(1/3)
+
+            distance_out = fragment_radius_i
+            while True:
+                fragment_x = collision_x + dir_x*distance_out
+                fragment_y = collision_y + dir_y*distance_out
+                fragment_z = collision_z + dir_z*distance_out
+
+                overlapping = False
+                for placed in fragments:
+                    separation = math.sqrt((placed.x-fragment_x)**2 + (placed.y-fragment_y)**2 + (placed.z-fragment_z)**2)
+                    if separation < placed.radius + fragment_radius_i:
+                        overlapping = True
+                        break
+
+                if not overlapping:
+                    break
+                distance_out += fragment_radius_i
+
+            fragments.append(Body(fragment_x, fragment_y, fragment_z, fragment_velocity_x, fragment_velocity_y, fragment_velocity_z, fragment_radius_i, fragment_density, 0.8, [0,0,0]))
+        drift_x = sum(f.mass*(f.velocity_x - com_velocity_x) for f in fragments) / total_mass
+        drift_y = sum(f.mass*(f.velocity_y - com_velocity_y) for f in fragments) / total_mass
+        drift_z = sum(f.mass*(f.velocity_z - com_velocity_z) for f in fragments) / total_mass
+
+        for f in fragments:
+            f.velocity_x -= drift_x
+            f.velocity_y -= drift_y
+            f.velocity_z -= drift_z
+
+        kick_energy = 0
+        for f in fragments:
+            kick_energy += 0.5*f.mass*((f.velocity_x-com_velocity_x)**2 + (f.velocity_y-com_velocity_y)**2 + (f.velocity_z-com_velocity_z)**2)
+
+        if kick_energy > 0:
+            scale = math.sqrt(leftover_energy / kick_energy)
+            for f in fragments:
+                f.velocity_x = com_velocity_x + (f.velocity_x - com_velocity_x)*scale
+                f.velocity_y = com_velocity_y + (f.velocity_y - com_velocity_y)*scale
+                f.velocity_z = com_velocity_z + (f.velocity_z - com_velocity_z)*scale
+
+        return fragments
+
+
+    def check_swept_collision(self, other, dt):
+        px = other.x - self.x
+        py = other.y - self.y
+        pz = other.z - self.z
+        vx, vy, vz = self.get_relative_velocity(other)
+
+        sx = px - vx*dt
+        sy = py - vy*dt
+        sz = pz - vz*dt
+
+        v_sq = vx**2 + vy**2 + vz**2
+        if v_sq == 0:
+            t = 0
+        else:
+            t = -(sx*vx + sy*vy + sz*vz) / v_sq
+            t = max(0, min(dt, t))
+
+        cx = sx + vx*t
+        cy = sy + vy*t
+        cz = sz + vz*t
+        return math.sqrt(cx**2 + cy**2 + cz**2) <= self.radius + other.radius
+    
+def sample_fragment_mass(m_min, m_max, b):
+    u = random.uniform(0, 1)
+    m = (u * (m_max**(1-b) - m_min**(1-b)) + m_min**(1-b)) ** (1/(1-b))
+    return m
+
+def generate_fragment_masses(total_mass, m_min, b):
+    m_max_initial = 0.5 * total_mass
+    remaining_mass = total_mass
+    fragment_masses = []
+
+    while remaining_mass >= m_min:
+        m_max = min(m_max_initial, remaining_mass)
+        fragment_mass = sample_fragment_mass(m_min, m_max, b)
+
+        fragment_masses.append(fragment_mass)
+        remaining_mass -= fragment_mass
+
+    if remaining_mass > 0 and len(fragment_masses) > 0:
+        fragment_masses[-1] += remaining_mass
+
+    return fragment_masses
+
+
 pygame.init()
 screen_x, screen_y = 800, 800
 win = pygame.display.set_mode((screen_x, screen_y))
@@ -181,10 +357,15 @@ font = pygame.font.Font(None, 24)
 meter_to_pixel = 800/5e11
 radius_to_pixel = 3e-7
 G = 6.674e-11
+max_cone_angle = math.pi/2
 fps = 240
 physics_dt = 1 / 240
 time_scale = 2e6
 zoom = 0.6
+fragment_b = 0.9
+min_fragment_radius = 1e6
+representative_density = 4250
+m_min = (4/3 * math.pi * min_fragment_radius**3) * representative_density
 min_brightness = 100
 max_brightness = 255
 
@@ -256,6 +437,7 @@ camera_angle = 0
 dragging = False
 simulated_time = 0
 E0 = None
+previously_touching = set()
 
 listed_energy = []
 deviation_list = []
@@ -278,6 +460,7 @@ while run:
     
     if paused == False:
         accumulator += dt / 1000
+        accumulator = min(accumulator, physics_dt * 20)
         while accumulator >= physics_dt:
 
             for body in bodies:
@@ -286,23 +469,50 @@ while run:
                 for other_body in bodies:
                     if other_body == body:
                         continue
-
-                    body.total_acceleration[0] += body.gravitational_acceleration(other_body,G)[0]
-                    body.total_acceleration[1] += body.gravitational_acceleration(other_body,G)[1]
-                    body.total_acceleration[2] += body.gravitational_acceleration(other_body,G)[2]
+                    acceleration = body.gravitational_acceleration(other_body,G)
+                    body.total_acceleration[0] += acceleration[0]
+                    body.total_acceleration[1] += acceleration[1]
+                    body.total_acceleration[2] += acceleration[2]
 
             for body in bodies:
                 body.update(physics_dt*time_scale)
+
+            pending_collisions = []
+            currently_touching = set()
 
             for i in range(len(bodies)):
                 for j in range(i + 1, len(bodies)):
                     body = bodies[i]
                     other_body = bodies[j]
 
-                    if body.check_collision(other_body):
-                        if body.is_approaching(other_body):
-                            body.apply_collision_impulse(other_body)
+                    if body.check_swept_collision(other_body, physics_dt*time_scale):
+                        pair = (body, other_body)
+                        currently_touching.add(pair)
+                        if pair not in previously_touching:
+                            pending_collisions.append(pair)
                         body.correct_position(other_body)
+
+            previously_touching = currently_touching
+
+            destroyed = set()
+            new_bodies = []
+
+            for body, other_body in pending_collisions:
+                if body in destroyed or other_body in destroyed:
+                    continue
+
+                result = body.collision_outcome(other_body, G, max_cone_angle, m_min, fragment_b, min_fragment_radius)
+
+                destroyed.add(body)
+                destroyed.add(other_body)
+                new_bodies.extend(result)
+
+                for first in range(len(result)):
+                    for second in range(first + 1, len(result)):
+                        previously_touching.add((result[first], result[second]))
+
+            bodies = [b for b in bodies if b not in destroyed]
+            bodies.extend(new_bodies)
 
             accumulator -= physics_dt
 
@@ -325,7 +535,7 @@ while run:
 
                 distance = body.gravitational_acceleration(other_body, G)[3]
 
-                potential_energy += (-(1 * body.mass * other_body.mass)/distance)
+                potential_energy += (-(G * body.mass * other_body.mass)/distance)
 
         total_energy = kinetic_energy + potential_energy
         if E0 == None:
@@ -340,7 +550,7 @@ while run:
             deviation_list.append(normalized_deviation)
         else:
             baseline = sum(deviation_list) / len(deviation_list)
-            if abs(normalized_deviation - baseline) > 0.02:
+            if abs(normalized_deviation - baseline) > 0.001:
 
                 if was_abnormal == False:
                     last_abnormal_event = simulated_time
@@ -357,6 +567,7 @@ while run:
                         after_frames_remaining = 3600
                     
                 was_abnormal = True
+                deviation_list = []
 
             else:
                 was_abnormal = False
@@ -460,7 +671,7 @@ while run:
                         for body in bodies:
                             saved_positions.append((body.x, body.y, body.z))
                         replay_data = event_replays[selected_event]
-                        print(f"replay length: {len(replay_data)}")
+                        
                         for frame_index, frame in enumerate(replay_data):
                             replay_dt = clock.tick(fps)
                             for i, body in enumerate(bodies):
