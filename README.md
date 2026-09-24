@@ -48,9 +48,19 @@ One thing about real units is that real orbital periods take months or years of 
 
 The semi-implicit method used for integration was tested against a previously identified failure mode (energy drift caused by explicit Euler's method), and it passed. Total energy stays bounded rather than increasing without bound.
 
-That test was from back when everything was toy-scale though, so i re-did it with real units and time_scale in place. Logged normalized energy deviation every frame over a 13,000 simulated-day run. It stayed in a narrow band for around the first 7,800 days, then shifted into a different, wider band and stayed bounded there too. So not unbounded drift, but i don't have an explanation for the shift itself yet.
+That test was from back when everything was toy-scale though, so i re-did it with real units over a 13,000 simulated-day run, and it looked like energy stayed in one band for around 7,800 days and then shifted into another. That result was wrong. The energy calculation was still using G = 1 from the toy-scale version, so potential energy came out around 10^10 times too big and kinetic energy basically didn't count. The force calculation always used the real G, so the simulation itself was fine, only the energy check was off.
+
+With the fix i redid it, 5 runs of about 13,500 simulated days each. Between steps energy barely changes. In 3 of the 5 runs it stayed within 0.5% the whole time. The other two jumped, by up to 4.7% and 11%. The 11% one ended 8.8% off, so it was a one-time jump and not slow drift, and the 4.7% one also had a merge in it, which takes energy out on purpose. The runs with the closest passes had the biggest jumps, which fits one 8,333 second step being too coarse to follow a close encounter. So energy stays bounded without steady drift, except for jumps during close passes.
 
 Close encounters have also been addressed by applying a softening term to prevent singularities at close encounter points.
+
+Collisions used to be a bounce with a restitution value, which isn't what planets actually do. Now when two bodies touch, the energy of the impact (reduced mass kinetic energy) is compared to how strongly both bodies hold themselves together (binding energy, G·m²/r for each, added up). If the impact is weaker, they merge into one body, with mass, momentum and position combined. If it's stronger, they break into fragments.
+
+Fragment sizes follow a power law, many small pieces and a few big ones, like real collision debris. The directions aren't random, they come from the impact itself: fragments fly out in a cone around the direction of the hit, and the cone gets wider the more the impact energy goes past the binding energy. Their speed comes from whatever energy is left after the binding energy. Total mass and momentum stay exactly the same as the two bodies had before.
+
+Collision detection checks the whole path a body moved during a step, not just where it ended up. One step covers 8,333 simulated seconds and planets move further than their own size in that time, so checking only end positions let them pass straight through each other.
+
+In practice real collisions are rare. Close passes happen much more often, and since the planets are heavy they usually slingshot each other instead of hitting.
 
 ## Orbit Assignment
 
@@ -71,7 +81,9 @@ This system is user interactable via an exploratory 3-dimensional view:
 
 Pause screen has the energy plot for the run so far, and under it a list of found events. Event here means a moment where total energy went further from its own recent rolling average than a set threshold. Picking one from the list plays back the recorded positions from a window before and after that moment, in the same view, and you can zoom during it or press escape to stop.
 
-Replay itself works from a rolling buffer of recent positions that gets copied when an event is found, then keeps recording for a while after. The speed it plays back at isn't verified to match the speed the frames were recorded at, so that part still needs checking.
+Replay itself works from a rolling buffer of recent positions that gets copied when an event is found, then keeps recording for a while after. One known problem: replay assumes the number of bodies stays the same, so an event that includes a merge or fragmentation won't play back correctly yet.
+
+Bodies are drawn much bigger than their real size compared to the distances between them, otherwise every planet would be smaller than a pixel. Because of that, two planets can overlap on screen while being far apart in the simulation, so an overlap on screen doesn't mean they collided.
 
 ---
 
@@ -97,9 +109,26 @@ This phenomenon relates directly to known physics problem: there exists no analy
 
 That particular result came from single trial of simulation with particular initial values I manually picked. I didn't test for consistency: for example, does small change of initial coordinates yield similar outcome? How dependent on precise initial separation distance this phenomenon is? Is it reproducible and meaningful pattern, or mere coincidence? This poses limitations rather than flaw of discovery itself.
 
+
+## 9/24/2026 — [12:43 PM UTC+4]
+
+This is written after the "add collision merging and fragmentation" commit and will include results I observed while coding it. In test simulations, for the most part, planets kept looking like they bounced, and made me believe something is broken with the current code. My first hypothesis was maybe they weren't even touching. To check if they were really touching, i thought about how the code handles a collision. Any real contact destroys both bodies, since they either merge into one or break into fragments, there is no bouncing anymore. Both bodies were still there after "bouncing", so they couldn't have touched. What looked like a bounce was actually gravity bending their paths while they passed close to each other.
+
+To get actual numbers i ran the same physics in a separate script without the window, 5 simulations of about 13,500 simulated days each. Two planets overlapped on screen 117 times, and only 1 of those was a real collision (a merge). In the other 116 they never touched. The closest they got was 3 times their combined radii, and usually it was more like 125 times. Their paths bent about 46 degrees in a typical pass and up to 177 degrees, and 29 of them turned more than 90 degrees, which is the kind that looks like a bounce.
+
+The reason it looked like contact is how bodies are drawn. Position and radius have two different scale constants, meter_to_pixel is 1.6e-9 and radius_to_pixel is 3e-7, and 3e-7 / 1.6e-9 comes out around 190. So every body is drawn about 190 times bigger compared to the distances between them. I did that on purpose, at true scale every planet would be smaller than a pixel, but it means two circles can overlap on screen while the bodies are still far apart.
+
+The bend was that strong because the planets are heavy. Escape velocity is v = √(2GM/R). For the biggest planet the code can make (radius 1e8 m, density 5500) i got a mass of about 2.3e28 kg and an escape velocity of around 175 km/s, while planets orbit at about 16 to 47 km/s. When escape velocity is that much bigger than how fast they move past each other, gravity turns them away before they can actually hit.
+
+Giving big planets gas giant density later should make them lighter and the slingshots weaker, so it'd be interesting to see if collisions become more common after that.
+
+**Just wanted to point out:**
+
+These numbers come from 5 runs, counted with the default camera angle and zoom, so a different view would give a different number of overlaps. My planets are also heavier than real ones, since big radii still get rocky density. The heaviest in these runs were 6.5 to 10.5 times Jupiter's mass, which makes the slingshots stronger than they would be in a real system. And one physics step is 8,333 simulated seconds, which is coarse for a close pass, so the bend angles aren't exact either.
+
 ---
 
-# Design notes
+# Design notes 
 
 ## 8/21/2026 — [4:14 AM UTC+4]
 
